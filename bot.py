@@ -7,6 +7,7 @@ from datetime import datetime, date
 import pytz
 import logging
 from datetime import timedelta
+import twitter_handler
 
 # 設置日誌
 logging.basicConfig(filename='bot.log', level=logging.INFO)
@@ -22,16 +23,6 @@ intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-@bot.event
-async def on_ready():
-    now = datetime.now(pytz.timezone('Asia/Hong_Kong'))
-    logging.info(f'{now}: {bot.user} 已連線到Discord!')
-    try:
-        synced = await tree.sync()
-        logging.info(f"{now}: 已同步 {len(synced)} 條斜線命令")
-    except Exception as e:
-        logging.error(f"{now}: 同步命令失敗: {e}")
-
 # 國家旗幟映射
 COUNTRY_FLAGS = {
     'England': '🇬🇧', 'Spain': '🇪🇸', 'Germany': '🇩🇪', 'Italy': '🇮🇹', 'France': '🇫🇷',
@@ -43,6 +34,29 @@ COUNTRY_FLAGS = {
     'Monegasque': '🇲🇨', 'Australian': '🇦🇺', 'Canadian': '🇨🇦', 'French': '🇫🇷', 'German': '🇩🇪',
     'Italian': '🇮🇹', 'Thai': '🇹🇭', 'Azerbaijan': '🇦🇿' , 'USA': '🇺🇸'
 }
+
+# 添加 on_message 事件
+@bot.event
+async def on_ready():
+    now = datetime.now(pytz.timezone('Asia/Hong_Kong'))
+    logging.info(f'{now}: {bot.user} 已連線到Discord!')
+    try:
+        synced = await tree.sync()
+        logging.info(f"{now}: 已同步 {len(synced)} 條斜線命令")
+    except Exception as e:
+        logging.error(f"{now}: 同步命令失敗: {e}")
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+    
+    results = await twitter_handler.process_x_links(message)
+    for result in results:
+        if result and result['type'] == 'reply':
+            await message.reply(**result['result'],mention_author=False)
+
+
 
 # 英超球隊emoji（保留shortname and short name）
 TEAM_EMOJIS = {
@@ -348,5 +362,15 @@ async def f1_standings(interaction: discord.Interaction):
         await interaction.followup.send(message)
     except requests.RequestException as e:
         await interaction.followup.send(f"⚠️ 無法搵到F1積分，請稍後再試。錯誤: {str(e)}")
+
+@tree.command(name="fix_x_link", description="將 x.com 連結轉為 fixupx.com")
+async def fix_x_link(interaction: discord.Interaction, url: str):
+    links = await twitter_handler.extract_x_links(url)
+    if not links:
+        await interaction.response.send_message("無效嘅 x.com 連結", ephemeral=True)
+        return
+    fixupx_url = twitter_handler.replace_to_fixupx(links[0])
+    view = await twitter_handler.create_tweet_view(links[0])
+    await interaction.response.send_message(content=fixupx_url, view=view)        
 
 bot.run(TOKEN)
